@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>清溪县农村房地一体确权登记数据库更新门户</title>
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="assets/css/portal.css">
+</head>
+<body>
+
+<!-- ========== 顶部栏 ========== -->
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-seal">房</div>
+    <div class="brand-text">
+      <h1>清溪县农村房地一体确权登记数据库 <span class="brand-sub">更新门户</span></h1>
+      <p>县域农村不动产确权成果动态更新 · 变更审核 · 版本追溯</p>
+    </div>
+  </div>
+  <nav class="main-nav">
+    <button class="nav-btn active" data-view="workbench">地图工作台</button>
+    <button class="nav-btn" data-view="stats">乡镇统计</button>
+  </nav>
+  <div class="top-right">
+    <label class="role-switch">
+      <span>当前岗位</span>
+      <select id="roleSelect">
+        <option value="reviewer">登记审核岗（县登记中心）</option>
+        <option value="clerk">乡镇经办岗（审批人员）</option>
+        <option value="patrol">自然资源所（查询巡查）</option>
+      </select>
+    </label>
+    <div class="user-chip">
+      <div class="user-avatar" id="userAvatar">审</div>
+      <div class="user-meta">
+        <strong id="userName">周建辉</strong>
+        <span id="userDept">县不动产登记中心 · 审核岗</span>
+      </div>
+    </div>
+    <span class="top-date" id="topDate"></span>
+  </div>
+</header>
+
+<!-- ========== 视图一：地图工作台 ========== -->
+<main class="view view-workbench active" id="view-workbench">
+
+  <!-- 左栏 -->
+  <aside class="panel panel-left">
+    <div class="panel-tabs">
+      <button class="ptab active" data-tab="search">档案查询</button>
+      <button class="ptab" data-tab="apply">变更办理 <em class="tab-badge" id="badgeApply">0</em></button>
+      <button class="ptab" data-tab="todo">待办审核 <em class="tab-badge badge-red" id="badgeTodo">0</em></button>
+    </div>
+
+    <!-- 查询 -->
+    <section class="tab-pane active" data-pane="search">
+      <div class="search-card">
+        <div class="field">
+          <label>乡镇</label>
+          <select id="qTown"><option value="">全部乡镇</option></select>
+        </div>
+        <div class="field">
+          <label>行政村 / 村组</label>
+          <select id="qGroup"><option value="">全部村组</option></select>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label>宗地编号</label>
+            <input id="qParcel" type="text" placeholder="如 JC00042" autocomplete="off">
+          </div>
+          <div class="field">
+            <label>权利人</label>
+            <input id="qOwner" type="text" placeholder="姓名" autocomplete="off">
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" id="btnSearch">查询</button>
+          <button class="btn btn-ghost" id="btnSearchReset">重置</button>
+        </div>
+      </div>
+      <div class="result-meta"><span id="resultCount">共 0 宗</span><span class="muted">点击定位查看档案</span></div>
+      <div class="result-list" id="resultList"></div>
+    </section>
+
+    <!-- 变更办理 -->
+    <section class="tab-pane" data-pane="apply">
+      <div class="apply-head">
+        <button class="btn btn-primary btn-block" id="btnNewChange">＋ 发起变更申请</button>
+        <p class="hint">先在地图或查询结果中选定宗地，再按「选类型 → 填申请 → 标范围」办理。</p>
+      </div>
+      <div class="app-filter" id="appStatusFilter">
+        <button class="chip-toggle active" data-st="">全部</button>
+        <button class="chip-toggle" data-st="待审核">待审核</button>
+        <button class="chip-toggle" data-st="待补正">待补正</button>
+        <button class="chip-toggle" data-st="已办结">已办结</button>
+      </div>
+      <div class="result-list" id="appList"></div>
+    </section>
+
+    <!-- 待办审核 -->
+    <section class="tab-pane" data-pane="todo">
+      <div class="todo-summary" id="todoSummary"></div>
+      <div class="result-list" id="todoList"></div>
+    </section>
+  </aside>
+
+  <!-- 地图 -->
+  <section class="map-wrap">
+    <div id="map"></div>
+
+    <!-- 图层控制 -->
+    <div class="map-card layer-card">
+      <h4>图层</h4>
+      <label><input type="checkbox" checked data-layer="parcels"> 宗地界址</label>
+      <label><input type="checkbox" checked data-layer="buildings"> 房屋轮廓</label>
+      <label><input type="checkbox" data-layer="history"> 历史界址</label>
+      <label><input type="checkbox" checked data-layer="labels"> 地名注记</label>
+      <label><input type="checkbox" checked data-layer="farmland"> 永久基本农田</label>
+      <label><input type="checkbox" checked data-layer="change"> 变更范围</label>
+    </div>
+
+    <!-- 图例 -->
+    <div class="map-card legend-card" id="legendCard">
+      <h4>图例 <button class="legend-fold" id="legendFold">收起</button></h4>
+      <div class="legend-body" id="legendBody">
+        <div><span class="lg lg-parcel"></span>已确权宗地</div>
+        <div><span class="lg lg-building"></span>房屋轮廓</div>
+        <div><span class="lg lg-changing"></span>变更办理中</div>
+        <div><span class="lg lg-dispute"></span>争议宗地</div>
+        <div><span class="lg lg-canceled"></span>已注销 / 拆除</div>
+        <div><span class="lg lg-old"></span>历史界址</div>
+        <div class="lg-gap"></div>
+        <div><span class="lg lg-add"></span>新增范围</div>
+        <div><span class="lg lg-adjust"></span>调整范围</div>
+        <div><span class="lg lg-remove"></span>注销范围</div>
+        <div><span class="lg lg-farm"></span>永久基本农田</div>
+      </div>
+    </div>
+
+    <!-- 绘制工具条（变更标绘时出现） -->
+    <div class="draw-bar" id="drawBar" hidden>
+      <span class="draw-title">地图标绘</span>
+      <button class="draw-tool active" data-tool="add">① 新增范围</button>
+      <button class="draw-tool" data-tool="adjust">② 调整界址</button>
+      <button class="draw-tool" data-tool="cancel">③ 注销范围</button>
+      <span class="draw-sep"></span>
+      <button class="btn btn-mini" id="drawUndo">撤销点</button>
+      <button class="btn btn-mini" id="drawFinish">闭合完成</button>
+      <button class="btn btn-mini" id="drawAbort">退出标绘</button>
+      <p class="draw-tip" id="drawTip">在图上依次点击界址点，点击起点闭合（至少 3 点）</p>
+    </div>
+
+    <!-- 前后对比滑块（审核时出现） -->
+    <div class="compare-bar" id="compareBar" hidden>
+      <span class="cmp-tag cmp-before">变更前</span>
+      <input type="range" id="compareSlider" min="0" max="100" value="50">
+      <span class="cmp-tag cmp-after">变更后</span>
+      <div class="cmp-modes">
+        <button class="cmp-mode active" data-mode="split">分屏对比</button>
+        <button class="cmp-mode" data-mode="before">仅前</button>
+        <button class="cmp-mode" data-mode="after">仅后</button>
+        <button class="cmp-mode" data-mode="overlay">叠加</button>
+      </div>
+    </div>
+
+    <!-- 历史回溯提示条 -->
+    <div class="trace-bar" id="traceBar" hidden>
+      <span id="traceText"></span>
+      <button class="btn btn-mini" id="traceExit">返回现状成果</button>
+    </div>
+
+    <div class="map-scale" id="mapScale"></div>
+  </section>
+
+  <!-- 右栏（动态：档案详情 / 变更向导 / 审核） -->
+  <aside class="panel panel-right" id="rightPanel">
+    <div class="right-empty" id="rightEmpty">
+      <div class="empty-icon">🗺️</div>
+      <h3>查看房地档案</h3>
+      <p>在地图上点击任一宗地，<br>或通过左侧按村组、宗地编号、权利人查询。</p>
+      <div class="empty-flow">
+        <div class="flow-step"><span>1</span>查询定位</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step"><span>2</span>档案对照</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step"><span>3</span>变更标绘</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step"><span>4</span>审核版本</div>
+      </div>
+    </div>
+    <div class="right-body" id="rightBody"></div>
+  </aside>
+</main>
+
+<!-- ========== 视图二：乡镇统计 ========== -->
+<main class="view view-stats" id="view-stats">
+  <div class="stats-inner">
+
+    <div class="stats-head">
+      <div>
+        <h2>全县变更动态汇总</h2>
+        <p>数据随审核确认实时更新 · 统计口径：2026 年度 1 月 1 日至今</p>
+      </div>
+      <div class="stats-head-actions">
+        <select id="statsYear"><option>2026 年度</option><option>2025 年度</option></select>
+        <button class="btn btn-ghost" id="statsExport">导出台账（占位）</button>
+      </div>
+    </div>
+
+    <div class="kpi-row" id="kpiRow"></div>
+
+    <div class="stats-grid">
+      <section class="card chart-card">
+        <header><h3>各乡镇变更情况</h3><span class="card-sub">单位：宗</span></header>
+        <div id="townChart"></div>
+        <p class="chart-note">表视图：<a href="#" id="gotoTable">查看乡镇汇总明细表 ↓</a></p>
+      </section>
+
+      <section class="card todo-card-sm">
+        <header><h3>未办结事项</h3><span class="card-sub" id="todoCardSub"></span></header>
+        <div id="statsTodo" class="stats-mini-list"></div>
+      </section>
+    </div>
+
+    <div class="stats-grid stats-grid-2">
+      <section class="card">
+        <header><h3 id="tblCaption">乡镇汇总明细</h3></header>
+        <table class="data-table" id="townTable">
+          <thead><tr><th>乡镇</th><th>变更数量</th><th>未办结</th><th>争议宗地</th><th>办结率</th><th>操作</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </section>
+
+      <section class="card">
+        <header><h3>争议宗地清单</h3><span class="card-sub">需现场调处后再办理登记</span></header>
+        <div id="disputeList" class="stats-mini-list"></div>
+      </section>
+    </div>
+
+  </div>
+</main>
+
+<!-- 材料查看弹窗 -->
+<div class="modal-mask" id="docModal" hidden>
+  <div class="modal">
+    <div class="modal-head"><h3 id="docModalTitle">关联材料</h3><button class="modal-x" id="docModalClose">×</button></div>
+    <div class="doc-preview"><div class="doc-stamp">扫描件</div><p id="docModalDesc"></p></div>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toastWrap"></div>
+
+<script src="vendor/leaflet/leaflet.js"></script>
+<script src="assets/js/data.js"></script>
+<script src="assets/js/app.js"></script>
+</body>
+</html>
