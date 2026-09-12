@@ -123,10 +123,11 @@ input,select,textarea{font-family:inherit;font-size:13px}
 /* 查询卡 */
 .search-card{padding:14px 14px 10px;border-bottom:1px solid var(--line-2)}
 .field{margin-bottom:10px;display:flex;flex-direction:column;gap:4px}
-.field-row{display:flex;gap:8px}
-.field-row .field{flex:1}
+.field-row{display:flex;gap:8px;min-width:0}
+.field-row .field{flex:1;min-width:0}
 .field label{font-size:11.5px;color:var(--ink-2);font-weight:600}
 .field input,.field select,.field textarea{
+  width:100%;min-width:0;
   border:1px solid var(--line);border-radius:6px;padding:7px 9px;background:#fff;color:var(--ink);outline:none;
 }
 .field input:focus,.field select:focus,.field textarea:focus{border-color:var(--navy-600);box-shadow:0 0 0 2px rgba(35,95,170,.12)}

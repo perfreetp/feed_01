@@ -67,6 +67,13 @@
   map.on('zoomend', updateLabelZoom);
   updateLabelZoom();
 
+  // 右栏开合、窗口缩放等导致地图容器尺寸变化时，校正 Leaflet（否则矢量层按旧尺寸错位、右侧空白）
+  let resizeRAF = null;
+  new ResizeObserver(() => {
+    if (resizeRAF) cancelAnimationFrame(resizeRAF);
+    resizeRAF = requestAnimationFrame(() => map.invalidateSize());
+  }).observe(document.getElementById('map'));
+
   function updateLabelZoom() {
     if (map.getZoom() >= 15.8) lgScopeLabels.addTo(map); else lgScopeLabels.remove();
   }
@@ -380,6 +387,7 @@
 
   /* ================= 右栏：档案详情 ================= */
   function selectParcel(code, fly) {
+    clearMapContext(); // 退出可能残留的历史回溯/前后对比状态
     state.selected = code;
     state.reviewId = null;
     state.wiz = null;
@@ -388,6 +396,13 @@
     highlightParcel(code);
     renderArchive();
     renderResultList();
+  }
+
+  // 统一清掉地图上的"上下文模式"（历史回溯、前后对比、审核横幅），回到现状成果
+  function clearMapContext() {
+    if (state.trace) exitTrace();
+    if (!$('#compareBar').hidden) exitCompare();
+    hideReviewBanner();
   }
 
   function renderArchive() {
@@ -647,6 +662,7 @@
         <div style="margin-top:10px">
           <div style="font-size:11.5px;font-weight:600;color:var(--ink-2);margin-bottom:5px">已标绘范围</div>
           <div id="scopeList"></div>
+          <div id="drawDraftHint" class="muted" style="font-size:11px;margin-top:4px"></div>
         </div>`}
       </div>`));
 
@@ -662,6 +678,7 @@
           resume.onclick = () => { w.paused = false; renderWizard(); };
           body.querySelector('#scopeList').after(resume);
         }
+        refreshDraftHint();
       }
 
       body.appendChild(el(`<div class="wiz-foot">
@@ -671,6 +688,10 @@
       $('#wizPrev').onclick = () => { exitDrawing(false); w.step = 1; renderWizard(); };
       $('#wizNext2').onclick = () => {
         if (a.geometric) {
+          // 正在绘制但尚未闭合：≥3 点时自动闭合后纳入，避免"画了却进不了下一步"
+          const d = state.drawing;
+          if (d && d.pts.length >= 3) finishPolygon();
+          else if (d && d.pts.length > 0) { toast('当前范围还没画完：点回第一个界址点闭合，或按「撤销点」清空', 'warn'); return; }
           const n = a.scope.add.length + a.scope.adjust.length + a.scope.cancel.length;
           if (!n) { toast('请先在地图上标绘变更范围（至少 1 个多边形）', 'warn'); return; }
         }
@@ -768,19 +789,36 @@
     if (!state.drawing) startDrawing(tool);
     state.drawing.tool = tool;
     $$('.draw-tool').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
-    const tips = { add: '在图上依次点击界址点标绘「新增范围」，点击起点或按「闭合完成」',
-      adjust: '在图上依次点击界址点标绘「调整 / 分宗范围」', cancel: '在图上依次点击圈定「注销范围」（拟拆除房屋）' };
+    const tips = { add: '在图上依次点击界址点标绘「新增范围」，画完点回第一个点（或点下方「闭合完成」）即可成形',
+      adjust: '在图上依次点击界址点标绘「调整 / 分宗范围」，≥3 点后点回起点闭合',
+      cancel: '在图上依次点击圈定「注销范围」（拟拆除房屋），≥3 点后点回起点闭合' };
     $('#drawTip').textContent = tips[tool];
   }
   function onMapDrawClick(e) {
     const d = state.drawing;
     const m = G.M([e.latlng.lat, e.latlng.lng]);
+    // 已达 3 点且点回起点附近（按屏幕像素，约一个界址点大小，避免缩放后误闭合）→ 闭合
     if (d.pts.length >= 3) {
-      const first = d.pts[0];
-      if (Math.hypot(first[0] - m[0], first[1] - m[1]) < 3) { finishPolygon(); return; }
+      const firstPx = map.latLngToContainerPoint(G.P(d.pts[0][0], d.pts[0][1]));
+      const curPx = e.containerPoint;
+      if (firstPx.distanceTo(curPx) < 14) { finishPolygon(); return; }
     }
     d.pts.push(m);
     redrawTemp();
+    refreshDraftHint();
+  }
+  function refreshDraftHint() {
+    const hint = $('#drawDraftHint');
+    if (!hint || !state.wiz) return;
+    const d = state.drawing;
+    if (d && d.pts.length > 0) {
+      hint.style.color = d.pts.length >= 3 ? '#16701a' : '#946200';
+      hint.textContent = d.pts.length >= 3
+        ? `已点 ${d.pts.length} 个界址点 —— 点回第一个点（或「闭合完成」）即成形；也可直接点「下一步」自动闭合`
+        : `已点 ${d.pts.length} 个界址点，继续在图上点击（至少 3 点）`;
+    } else {
+      hint.textContent = '';
+    }
   }
   function redrawTemp() {
     const d = state.drawing;
@@ -805,6 +843,7 @@
       const box = document.querySelector('#scopeList');
       if (box) renderScopeList(box);
     }
+    refreshDraftHint();
     toast('范围已闭合，可切换工具继续标绘，或进入下一步', 'ok');
   }
 
@@ -815,6 +854,7 @@
     state.selected = a.parcelCode;
     state.reviewId = id;
     state.wiz = null;
+    if (state.trace) exitTrace(); // 从历史回溯直接进入审核，先回到现状成果
     exitDrawing(false);
     highlightParcel(a.parcelCode);
     flyToParcel(a.parcelCode);
@@ -921,8 +961,12 @@
   /* ---------------- 前后对比 ---------------- */
   function enterCompare(a) {
     $('#compareBar').hidden = false;
+    const pane = map.getPane('afterPane');
+    pane.style.display = '';      // 复位可能残留的"仅前"隐藏
+    pane.style.clipPath = 'none';
     lgChange.remove(); // 对比模式下，变更提议只在「变更后」窗格显示
     lgScopeLabels.remove();
+    lgBuildings.addTo(map);
     lgAfter.clearLayers();
     const p = QX.byCode(a.parcelCode);
     // 变更后：原界址 + 变更范围重绘于 afterPane
@@ -1346,9 +1390,15 @@
     renderAppList();
   });
   $('#btnNewChange').onclick = () => {
+    // 无论岗位，先确认已选定宗地
+    if (!state.selected) { toast('请先在地图或查询结果中点击选定要变更的宗地', 'warn'); switchTab('search'); return; }
     const role = ROLES[state.role];
-    if (!role.canApply) { toast('请先查询选定宗地；发起申请由乡镇经办岗操作', 'warn'); return; }
-    if (!state.selected) { toast('请先在查询结果或地图上选定要变更的宗地', 'warn'); switchTab('search'); return; }
+    if (!role.canApply) {
+      const p = QX.byCode(state.selected);
+      const roleName = $('#roleSelect').selectedOptions[0].textContent.trim();
+      toast(`已选定 ${p.code}，但「${roleName}」无发起权限，请切换到乡镇经办岗办理`, 'warn');
+      return;
+    }
     startWizard(QX.byCode(state.selected));
   };
 
@@ -1361,7 +1411,7 @@
 
   /* 绘制工具 */
   $$('.draw-tool').forEach(b => b.onclick = () => setDrawTool(b.dataset.tool));
-  $('#drawUndo').onclick = () => { const d = state.drawing; if (d && d.pts.length) { d.pts.pop(); redrawTemp(); } };
+  $('#drawUndo').onclick = () => { const d = state.drawing; if (d && d.pts.length) { d.pts.pop(); redrawTemp(); refreshDraftHint(); } };
   $('#drawFinish').onclick = () => finishPolygon();
   $('#drawAbort').onclick = () => {
     if (state.wiz) state.wiz.paused = true;
